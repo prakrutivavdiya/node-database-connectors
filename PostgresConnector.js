@@ -458,7 +458,7 @@ function createUpdate(arr) {
         if (encloseFieldFlag == true) {
           selectText = (obj.table?(encloseField(obj.table) + '.'):'') + field + '=null';
         } else {
-          selectText = field;
+          selectText = field + '=null';
         }
       }
       tempArr.push(selectText);
