@@ -20,7 +20,8 @@ function connectPool(json, cb) {
     user: json.user,
     database: json.database,
     password: json.password,
-    ssl: { rejectUnauthorized: false },
+    application_name:json.application_name,
+    ssl: false,
     idleTimeoutMillis: 30000
   };
 
@@ -56,7 +57,7 @@ function connect(json, cb) {
     user: json.user,
     database: json.database,
     password: json.password,
-    ssl: { rejectUnauthorized: false }
+    ssl:false
   };
 
   const client = new Client(connectionConfig);
@@ -100,14 +101,14 @@ function createInsertQuery(json) {
   }
   if (!Array.isArray(vInsert)) {
     if (!Array.isArray(vInsert.fValue[0])) {
-      query = `INSERT INTO ${table} (${arrInsert.fieldArr.join(', ')}) VALUES (${arrInsert.valueArr.join(', ')})`;
+      query = `INSERT INTO ${json.schema?(json.schema+"."):""}${table} (${arrInsert.fieldArr.join(', ')}) VALUES (${arrInsert.valueArr.join(', ')})`;
     } else {
       const valueRows = arrInsert.valueArr.join('');
-      query = `INSERT INTO ${table} (${arrInsert.fieldArr.join(', ')}) VALUES ${valueRows}`;
+      query = `INSERT INTO ${json.schema?(json.schema+"."):""}${table} (${arrInsert.fieldArr.join(', ')}) VALUES ${valueRows}`;
     }
   } else {
     //single row insert
-    query = `INSERT INTO ${table} (${arrInsert.fieldArr.join(', ')}) VALUES (${arrInsert.valueArr.join(', ')})`;
+    query = `INSERT INTO ${json.schema?(json.schema+"."):""}${table} (${arrInsert.fieldArr.join(', ')}) VALUES (${arrInsert.valueArr.join(', ')})`;
   }
 
   return query + ' RETURNING * ;';
@@ -124,17 +125,17 @@ function createUpdateQuery(json) {
     join = json.join ? json.join : null;
 
   if (vFilter != null)
-    arrFilter = createFilter(vFilter);
+    arrFilter = createFilter(json.alias||json.table,vFilter);
   if (join != null) {
-    strJOIN = createJOIN(join);
+    strJOIN = createJOIN(json.alias||json.table,join,json.schema);
     if (strJOIN.length > 0) {
       table = strJOIN;
     } else {
-      table = encloseField(table) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
+      table = (json.schema?(json.schema+"."):"")+encloseField(table) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
     }
   }
 
-  arrUpdate = createUpdate(vUpdate);
+  arrUpdate = createUpdate(json.alias||json.table,vUpdate);
   query = 'UPDATE ' + table + ' SET ' + arrUpdate.join() + '';
   if (arrFilter.length > 0) {
     query += ' WHERE ' + arrFilter.join('');
@@ -160,20 +161,20 @@ function createSelectQuery(json, selectAll) {
     vHaving = json.having ? json.having : null;
 
   if (vHaving != null)
-    arrHaving = createAggregationFilter(vHaving);
+    arrHaving = createAggregationFilter(json.alias||json.table ,vHaving);
   if (vGroupby != null)
-    arrGroupBy = createSelect(vGroupby, false);
+    arrGroupBy = createSelect(json.alias||json.table , vGroupby, false);
   if (vFilter != null)
-    arrFilter = createFilter(vFilter);
+    arrFilter = createFilter(json.alias||json.table ,vFilter);
 
-  arrSelect = createSelect(vSelect, true);
+  arrSelect = createSelect(json.alias||json.table , vSelect, true);
 
   //from/join
-  strJOIN = createJOIN(join);
+  strJOIN = createJOIN(json.alias||json.table ,join,json.schema);
   if (strJOIN.length > 0) {
     table = strJOIN;
   } else {
-    table = encloseField(table) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
+    table = (json.schema?(json.schema+"."):"")+encloseField(table) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
   }
 
   //order by
@@ -217,13 +218,13 @@ function createDeleteQuery(json) {
   var arrFilter = [];
   var vFilter = json.filter ? json.filter : null;;
   if (vFilter != null) {
-    arrFilter = createFilter(vFilter);
+    arrFilter = createFilter(json.alias||json.table ,vFilter);
   }
   var query = '';
   if (arrFilter.length > 0) {
-    query = 'DELETE FROM ' + table + ' WHERE' + arrFilter.join('');
+    query = 'DELETE FROM ' +(json.schema?(json.schema+"."):"")+ table + ' WHERE' + arrFilter.join('');
   } else {
-    query = 'DELETE FROM ' + table + ' WHERE 1=1';
+    query = 'DELETE FROM ' + (json.schema?(json.schema+"."):"")+table + ' WHERE 1=1';
   }
   return query + ' RETURNING * ;';
 }
@@ -264,7 +265,7 @@ function prepareQuery(json) {
 }
 
 //Create select expression
-function createSelect(arr, selectAll) {
+function createSelect(table_nm,arr, selectAll) {
   var tempArr = [];
   if (arr != null) {
     if (arr.length == 0 && selectAll == true) {
@@ -280,7 +281,7 @@ function createSelect(arr, selectAll) {
         }
         var encloseFieldFlag = (obj.encloseField != undefined) ? obj.encloseField : true;
         var field = encloseField(obj.field, encloseFieldFlag);
-        var table = encloseField((obj.table ? obj.table : ''));
+        var table = encloseField((obj.table ? obj.table : table_nm));
         var hasAlias = (obj.alias ? true : false);
         var alias = encloseField((obj.alias ? obj.alias : obj.field));
         var expression = obj.expression ? obj.expression : null;
@@ -439,7 +440,7 @@ function replaceSingleQuote(aValue) {
   }
 }
 
-function createUpdate(arr) {
+function createUpdate(table_nm, arr) {
   var tempArr = [];
   if (arr != null) {
     for (var s = 0; s < arr.length; s++) {
@@ -453,10 +454,10 @@ function createUpdate(arr) {
       fValue = (fValue == null ? fValue : replaceSingleQuote(fValue));
       var selectText = '';
       if (fValue != null) {
-        selectText = (obj.table?(encloseField(obj.table) + '.'):'') + field + '=' + '\'' + fValue + '\'';
+        selectText = ((obj.table || table_nm)?(encloseField((obj.table || table_nm)) + '.'):'') + field + '=' + '\'' + fValue + '\'';
       } else {
         if (encloseFieldFlag == true) {
-          selectText = (obj.table?(encloseField(obj.table) + '.'):'') + field + '=null';
+          selectText = ((obj.table || table_nm)?(encloseField((obj.table || table_nm)) + '.'):'') + field + '=null';
         } else {
           selectText = field + '=null';
         }
@@ -467,33 +468,33 @@ function createUpdate(arr) {
   }
 }
 //Create select expression
-function createAggregationFilter(obj) {
+function createAggregationFilter(table_nm,obj) {
   var tempHaving = [];
   if (obj != null) {
-    tempHaving = createFilter(obj);
+    tempHaving = createFilter(table_nm,obj);
   }
   return tempHaving;
 }
 
 exports.createFilter = function (arr) {
-  return createFilter(arr);
+  return createFilter("",arr);
 }
 
 //Create filter conditions set
-function createFilter(arr) {
+function createFilter(table_nm,arr) {
   var tempArrFilter = [];
   if (arr != null) {
     if (arr.hasOwnProperty('and') || arr.hasOwnProperty('AND') || arr.hasOwnProperty('or') || arr.hasOwnProperty('OR')) { //multiple conditions
-      tempArrFilter = createMultipleConditions(arr);
+      tempArrFilter = createMultipleConditions(table_nm,arr);
     } else { //single condition
-      var conditiontext = createSingleCondition(arr);
+      var conditiontext = createSingleCondition(table_nm,arr);
       tempArrFilter.push(conditiontext);
     }
   }
   return tempArrFilter;
 }
 
-function createMultipleConditions(obj) {
+function createMultipleConditions(table_nm,obj) {
   var tempArrFilters = [];
   var conditionType = Object.keys(obj)[0]; //AND/OR/NONE
   var listOfConditions = obj[conditionType]; //all conditions
@@ -502,12 +503,12 @@ function createMultipleConditions(obj) {
       var tempConditionType = Object.keys(listOfConditions[c])[0];
       //console.log('*************' + tempConditionType + '*******************');
       if (tempConditionType.toString().toLowerCase() == 'and' || tempConditionType.toString().toLowerCase() == 'or') {
-        tempArrFilters.push(createMultipleConditions(listOfConditions[c]));
+        tempArrFilters.push(createMultipleConditions(table_nm,listOfConditions[c]));
       } else if (tempConditionType.toString().toLowerCase() == 'none') {
-        var conditiontext = createSingleCondition(listOfConditions[c].none);
+        var conditiontext = createSingleCondition(table_nm,listOfConditions[c].none);
         tempArrFilters.push(conditiontext);
       } else {
-        var conditiontext = createSingleCondition(listOfConditions[c]);
+        var conditiontext = createSingleCondition(table_nm,listOfConditions[c]);
         tempArrFilters.push(conditiontext);
       }
     }
@@ -529,7 +530,20 @@ function encloseField(a, flag) {
   else
     return a;
 }
-
+function valuePrefix(fieldType){
+  var prefix='';
+  if(!fieldType) return prefix;
+  type=fieldType.toLowerCase();
+  switch (type) {
+    case "timestamp":
+      prefix = "TIMESTAMP";
+      break;
+    default:
+      prefix = '';
+      break;
+  }
+  return prefix;
+}
 function operatorSign(operator, value) {
   var sign = '';
   if (operator.toString().toLowerCase() == 'eq') {
@@ -570,11 +584,12 @@ function operatorSign(operator, value) {
   return sign;
 }
 
-function createSingleCondition(obj) {
+function createSingleCondition(table_nm,obj) {
   var field = obj.field,
-    table = obj.table ? obj.table : '',
+    table = obj.table ? obj.table : table_nm,
     aggregation = obj.aggregation ? obj.aggregation : null,
     operator = obj.operator,
+    fieldType=obj.fieldType,
     value = obj.value,
     encloseFieldFlag = obj.encloseField;
   if (encloseFieldFlag != undefined && typeof encloseFieldFlag != "boolean") {
@@ -632,8 +647,9 @@ function createSingleCondition(obj) {
       value = updatedValue;
     }
     var sign = operatorSign(operator, value);
+    var prefix = valuePrefix(fieldType);
     if (sign.indexOf('IN') > -1) { //IN condition has different format
-      var tempValue = value.map(d => d != null ? d.toString().replace(/\'/ig, "\\\'") : d).join("','");
+      var tempValue = value.map(d => d != null ? ((prefix?prefix+' ':'')+d.toString().replace(/\'/ig, "\\\'")) : d).join("','");
       conditiontext += " " + sign + " ('" + tempValue + "')";
     } else {
       var tempValue = '';
@@ -642,11 +658,14 @@ function createSingleCondition(obj) {
       } else if (typeof value === 'object') {
         sign = operatorSign(operator, '');
         if (value.hasOwnProperty('field')) {
-          var rTable = value.table ? value.table : '';
+          var rTable = value.table ? value.table : table_nm;
           tempValue = (rTable?(encloseField(rTable) + '.'):'') + encloseField(value.field);
         }
-      } else {
-        tempValue = '\'' + replaceSingleQuote(value) + '\'';
+      }else if (typeof value === 'number') {
+        tempValue = (prefix?prefix+' ':'')+ replaceSingleQuote(value);
+      }
+       else {
+        tempValue = (prefix?prefix+' ':'')+ '\''+ replaceSingleQuote(value) + '\'';
       }
       conditiontext += ' ' + sign + ' ' + tempValue;
     }
@@ -655,20 +674,20 @@ function createSingleCondition(obj) {
 }
 
 //create join conditions
-function createJOIN(join) {
+function createJOIN(table_nm,join,schema) {
   var joinText = '';
   if (join != null) {
     var fromTbl = join.table;
     var fromTblAlias = join.alias;
     var joinwith = join.joinwith;
     // var strJoinConditions = '';
-    joinText += encloseField(fromTbl) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
+    joinText += (schema?(schema+"."):"")+encloseField(fromTbl) + (fromTblAlias ? (' as ' + fromTblAlias) : '');
     for (var j = 0; j < joinwith.length; j++) {
       var table = joinwith[j].table,
         tableAlias = joinwith[j].alias,
         type = joinwith[j].type ? joinwith[j].type : 'INNER',
         joincondition = joinwith[j].joincondition;
-      joinText += ' ' + type.toString().toUpperCase() + ' JOIN ' + encloseField(table) + (tableAlias ? (' as ' + tableAlias) : '') + ' ON ' + createFilter(joincondition).join('');
+      joinText += ' ' + type.toString().toUpperCase() + ' JOIN ' + (schema?(schema+"."):"")+ encloseField(table) + (tableAlias ? (' as ' + tableAlias) : '') + ' ON ' + createFilter(table_nm,joincondition).join('');
     }
   }
   return joinText;
